@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cozy Todo | Zero-Trust</title>
+    <style>
+        :root { --bg: #f8f9fa; --text: #1a1a1a; --accent: #007bff; --danger: #dc3545; --card-bg: #ffffff; }
+        body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 40px; color: var(--text); line-height: 1.5; }
+        .card { border-radius: 12px; padding: 24px; background: var(--card-bg); box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 24px; border: 1px solid #e1e4e8; }
+        h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 12px; }
+        h1::before { content: '✅'; }
+        h3 { margin-top: 0; font-size: 1.1rem; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+        button { background: var(--accent); color: white; border: none; padding: 10px 20px; font-weight: 600; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
+        button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        button.secondary { background: #e9ecef; color: #495057; }
+        button.danger { background: var(--danger); }
+        input { border: 2px solid #e1e4e8; padding: 10px; border-radius: 6px; width: 260px; font-size: 1rem; transition: border-color 0.2s; }
+        input:focus { outline: none; border-color: var(--accent); }
+        .tag { background: #e9ecef; color: #495057; padding: 4px 10px; font-size: 12px; border-radius: 4px; font-weight: 600; }
+        .user-info { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
+        .role-badge { background: #d1e7dd; color: #0f5132; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+        .todo-item { padding: 12px 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f3f5; }
+        .todo-item:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <h1>Cozy Todo <span style="color: #6c757d; font-weight: 400; font-size: 1rem;">(Next-Gen Zero-Trust)</span></h1>
+    
+    <div id="auth-section" class="card">
+        <h3>🔐 Identity Hub</h3>
+        <div id="user-display-container" class="user-info">
+            <span>Current User:</span> <b id="user-display">Checking...</b>
+        </div>
+        <div id="auth-controls">
+            <!-- Buttons will be injected here -->
+        </div>
+    </div>
+
+    <div id="app-section" class="card" style="display:none;">
+        <h3>📝 Secure Todo API</h3>
+        <div id="todo-controls" style="display: flex; gap: 10px; margin-bottom: 20px;">
+            <input type="text" id="todo-input" placeholder="What needs to be done?">
+            <button onclick="addTodo()">Add Task</button>
+        </div>
+        <div id="todo-list">
+            <!-- Todos loaded via cookie-auth -->
+        </div>
+        <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #eee;">
+            <button class="danger" onclick="purgeAll()">Purge Cluster (SuperAdmin Only)</button>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        async function checkAuth() {
+            // Check for accessToken in URL (Redirect from Hub)
+            const urlParams = new URLSearchParams(window.location.search);
+            const tokenFromUrl = urlParams.get('accessToken');
+            
+            if (tokenFromUrl) {
+                // Set the cookie so the framework picks it up on the next requests
+                document.cookie = `accessToken=${tokenFromUrl}; path=/; max-age=${4 * 60 * 60}; samesite=lax`;
+                
+                // Clean the URL
+                const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                window.history.replaceState({}, document.title, cleanUrl);
+            }
+
+            try {
+                const res = await fetch('/api/whoami');
+                if (res.ok) {
+                    const data = await res.json();
+                    currentUser = data.user;
+                    renderAuth(true);
+                    fetchTodos();
+                } else {
+                    renderAuth(false);
+                }
+            } catch (e) {
+                renderAuth(false);
+            }
+        }
+
+        function renderAuth(isAuthed) {
+            const display = document.getElementById('user-display');
+            const controls = document.getElementById('auth-controls');
+            const appSection = document.getElementById('app-section');
+
+            if (isAuthed && currentUser) {
+                display.innerHTML = `${currentUser.email} <span class="role-badge">${currentUser.role}</span>`;
+                controls.innerHTML = `<button class="secondary" onclick="logout()">Logout</button>`;
+                appSection.style.display = 'block';
+            } else {
+                display.innerText = 'Anonymous';
+                controls.innerHTML = `<button onclick="login()">Login with Cozy SSO</button>`;
+                appSection.style.display = 'none';
+            }
+        }
+
+        function login() {
+            // Simple redirect to our login route which redirects to the Hub
+            window.location.href = '/api/login?returnUrl=' + encodeURIComponent(window.location.href);
+        }
+
+        function logout() {
+            // For now, clear the cookie by expiring it (if it's not HttpOnly)
+            // Ideally we'd have a server route to clear the cookie
+            document.cookie = "accessToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            window.location.reload();
+        }
+
+        async function fetchTodos() {
+            const res = await fetch('/api/todos');
+            if (!res.ok) return;
+            const data = await res.json();
+            const list = document.getElementById('todo-list');
+            list.innerHTML = data.map(t => `
+                <div class="todo-item">
+                    <span style="display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" ${t.completed ? 'checked' : ''} disabled>
+                        <span style="${t.completed ? 'text-decoration: line-through; color: #adb5bd' : ''}">${t.text}</span>
+                    </span>
+                    <span class="tag">Owner: ${t.owner}</span>
+                </div>
+            `).join('') || '<p style="color: #6c757d">No tasks yet.</p>';
+        }
+
+        async function addTodo() {
+            const input = document.getElementById('todo-input');
+            const text = input.value;
+            if (!text) return;
+
+            const res = await fetch('/api/todos', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+
+            if (res.ok) {
+                input.value = '';
+                fetchTodos();
+            }
+        }
+
+        async function purgeAll() {
+            if (!confirm('Are you sure you want to purge the entire cluster?')) return;
+            
+            const res = await fetch('/api/admin/purge', { method: 'POST' });
+            if (res.status === 401 || res.status === 403) {
+                alert('🛑 ACCESS DENIED: This action requires the SuperAdmin Global Role.');
+            } else {
+                const data = await res.json();
+                alert(data.message);
+                fetchTodos();
+            }
+        }
+
+        checkAuth();
+    </script>
+</body>
+</html>
