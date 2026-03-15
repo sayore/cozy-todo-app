@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@cozy/server": "workspace:*",
-    "@cozy/sso-client": "link:../auth/packages/sso-client",
+    "@cozy/sso-client": "workspace:*",
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
